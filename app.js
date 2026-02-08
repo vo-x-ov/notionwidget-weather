@@ -32,6 +32,7 @@ function codeToSummary(code){
 
 function elementFor(summary){
   const s = summary.toLowerCase();
+
   if (s.includes("rain") || s.includes("drizzle") || s.includes("snow") || s.includes("thunder") || s.includes("showers")){
     return { label: "💧 Water", cue: "Release, cleanse, soften. Small ritual: rinse hands + 3 slow breaths." };
   }
@@ -64,7 +65,7 @@ function setHeader(label){
   document.getElementById("time").textContent = fmtTime();
 }
 
-// ---- Location resolution ----
+// ---- Geocoding ----
 async function geocodeSearch(query){
   const url = new URL("https://geocoding-api.open-meteo.com/v1/search");
   url.searchParams.set("name", query);
@@ -148,6 +149,7 @@ function renderWeather(data){
 
   document.getElementById("elementBadge").textContent = element.label;
 
+  // Optional ritual cue: toggle with ?cue=0
   const cueOn = (qs("cue") ?? "1") !== "0";
   document.getElementById("ritualCue").textContent = cueOn ? element.cue : "";
 }
@@ -162,7 +164,6 @@ async function loadAndRender(loc){
 function setupPicker(){
   const input = document.getElementById("cityInput");
   const box = document.getElementById("suggestions");
-
   let debounceTimer = null;
 
   function hide(){
@@ -170,8 +171,19 @@ function setupPicker(){
     box.innerHTML = "";
   }
 
-  function show(items){
+  function show(items, query){
     box.innerHTML = "";
+
+    if (!items || items.length === 0){
+      const empty = document.createElement("div");
+      empty.className = "suggestion";
+      empty.style.cursor = "default";
+      empty.innerHTML = `<span>No matches for “${query}”</span><small>try another</small>`;
+      box.appendChild(empty);
+      box.hidden = false;
+      return;
+    }
+
     items.forEach((r) => {
       const div = document.createElement("div");
       div.className = "suggestion";
@@ -179,13 +191,14 @@ function setupPicker(){
       div.addEventListener("click", async () => {
         const loc = { lat: r.latitude, lon: r.longitude, label: locLabel(r) };
         saveLocation(loc);
-        input.value = ""; // reset
+        input.value = "";
         hide();
         await loadAndRender(loc);
       });
       box.appendChild(div);
     });
-    box.hidden = items.length === 0;
+
+    box.hidden = false;
   }
 
   input.addEventListener("input", () => {
@@ -196,19 +209,19 @@ function setupPicker(){
 
     debounceTimer = setTimeout(async () => {
       const results = await geocodeSearch(q);
-      show(results);
+      show(results, q);
     }, 250);
   });
 
-  // Close suggestions when clicking outside
+  // Escape closes
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") hide();
+  });
+
+  // Clicking outside the picker closes suggestions
   document.addEventListener("click", (e) => {
     const picker = e.target.closest(".picker");
     if (!picker) hide();
-  });
-
-  // Escape key closes
-  input.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") hide();
   });
 }
 
