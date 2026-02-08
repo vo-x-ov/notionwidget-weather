@@ -9,20 +9,20 @@
 <body>
   <main class="card" aria-live="polite">
     <header class="top">
-  <div class="left">
-    <div class="location" id="location">Loading…</div>
-    <div class="time" id="time"></div>
-  </div>
+      <div class="left">
+        <div class="location" id="location">Loading…</div>
+        <div class="time" id="time"></div>
+      </div>
 
-  <div class="controls">
-    <div class="picker">
-  <input id="cityInput" type="text" placeholder="Search city…" autocomplete="off" />
-  <div id="suggestions" class="suggestions" hidden></div>
-</div>
-    <div class="badge" id="elementBadge">—</div>
-  </div>
-</header>
+      <div class="controls">
+        <div class="picker">
+          <input id="cityInput" type="text" placeholder="Search city…" autocomplete="off" />
+          <div id="suggestions" class="suggestions" hidden></div>
+        </div>
 
+        <div class="badge" id="elementBadge">—</div>
+      </div>
+    </header>
 
     <section class="mid">
       <div class="temp">
@@ -44,6 +44,7 @@
     <footer class="footer" id="ritualCue"></footer>
   </main>
 
-  <script src="./app.js"></script>
+  <!-- If Notion caches old JS, bump ?v=1 to ?v=2 etc -->
+  <script src="./app.js?v=1"></script>
 </body>
 </html>
