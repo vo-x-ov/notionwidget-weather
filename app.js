@@ -1,9 +1,7 @@
 // ---- CONFIG ----
-// Option 1: hardcode coordinates (simplest / most reliable in Notion embeds)
+// Fallback if no location params are provided:
 const DEFAULT_LAT = 41.8781;   // Chicago
 const DEFAULT_LON = -87.6298;
-
-// Optional: set a nicer label for your card header
 const DEFAULT_LABEL = "Chicago";
 
 // ---- Helpers ----
@@ -12,8 +10,12 @@ function qs(key){
   return url.searchParams.get(key);
 }
 
+function fmtTime(){
+  const d = new Date();
+  return d.toLocaleString(undefined, { weekday:"short", hour:"numeric", minute:"2-digit" });
+}
+
 // Open-Meteo weather code → label
-// (compact, good enough for a Notion card)
 function codeToSummary(code){
   const map = new Map([
     [0, "Clear"],
@@ -41,25 +43,74 @@ function elementFor(summary){
   if (s.includes("clear")){
     return { label: "🔥 Fire", cue: "Initiate, create, move. Small ritual: light a candle + name today’s intention." };
   }
-  // Cloudy/overcast etc
   return { label: "🌱 Earth", cue: "Stabilize, tend, ground. Small ritual: tidy one surface + feel your feet." };
 }
 
-function fmtTime(){
-  const d = new Date();
-  return d.toLocaleString(undefined, { weekday:"short", hour:"numeric", minute:"2-digit" });
+async function geocodeCity(city, region, country){
+  const url = new URL("https://geocoding-api.open-meteo.com/v1/search");
+  url.searchParams.set("name", city);
+  url.searchParams.set("count", "1");
+  url.searchParams.set("language", "en");
+  url.searchParams.set("format", "json");
+  if (country) url.searchParams.set("country", country);
+  // Open-Meteo geocoding doesn’t have a strict “region” param, but we can bias results:
+  // We'll keep region for labeling and (if you want later) could do more filtering.
+
+  const res = await fetch(url.toString(), { cache: "no-store" });
+  if (!res.ok) throw new Error("Geocoding failed");
+  const data = await res.json();
+
+  if (!data.results || data.results.length === 0) {
+    throw new Error("No geocoding results");
+  }
+
+  const r = data.results[0];
+  const labelParts = [r.name];
+  if (region) labelParts.push(region);
+  else if (r.admin1) labelParts.push(r.admin1);
+  if (country || r.country_code) labelParts.push((country ?? r.country_code).toUpperCase());
+
+  return {
+    lat: r.latitude,
+    lon: r.longitude,
+    label: labelParts.join(", ")
+  };
+}
+
+async function resolveLocation(){
+  // Prefer explicit coordinates
+  const latParam = qs("lat");
+  const lonParam = qs("lon");
+  const labelParam = qs("label");
+
+  if (latParam && lonParam && !Number.isNaN(Number(latParam)) && !Number.isNaN(Number(lonParam))) {
+    return {
+      lat: Number(latParam),
+      lon: Number(lonParam),
+      label: labelParam ?? "Weather"
+    };
+  }
+
+  // Otherwise allow city-based location
+  const city = qs("city");
+  const region = qs("region");   // e.g. TX, IL
+  const country = qs("country"); // e.g. US, GB
+
+  if (city) {
+    return await geocodeCity(city, region, country);
+  }
+
+  // Fallback
+  return { lat: DEFAULT_LAT, lon: DEFAULT_LON, label: DEFAULT_LABEL };
 }
 
 // ---- Main ----
 async function run(){
-  const lat = Number(qs("lat") ?? DEFAULT_LAT);
-  const lon = Number(qs("lon") ?? DEFAULT_LON);
-  const label = qs("label") ?? DEFAULT_LABEL;
+  const { lat, lon, label } = await resolveLocation();
 
   document.getElementById("location").textContent = label;
   document.getElementById("time").textContent = fmtTime();
 
-  // Open-Meteo forecast API (no API key) :contentReference[oaicite:2]{index=2}
   const url = new URL("https://api.open-meteo.com/v1/forecast");
   url.searchParams.set("latitude", String(lat));
   url.searchParams.set("longitude", String(lon));
@@ -72,7 +123,6 @@ async function run(){
 
   const res = await fetch(url.toString(), { cache: "no-store" });
   if (!res.ok) throw new Error("Weather fetch failed");
-
   const data = await res.json();
 
   const cur = data.current;
@@ -107,6 +157,6 @@ async function run(){
 
 run().catch(err => {
   document.getElementById("location").textContent = "Weather unavailable";
-  document.getElementById("summary").textContent = "Check connection / settings";
+  document.getElementById("summary").textContent = "Check location params";
   console.error(err);
 });
