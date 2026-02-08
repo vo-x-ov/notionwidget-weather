@@ -90,3 +90,69 @@ body{
   color: var(--muted);
   min-height: 16px;
 }
+
+.top{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.left { min-width: 120px; }
+
+.controls{
+  display:flex;
+  align-items:center;
+  gap: 10px;
+}
+
+.picker{
+  position: relative;
+  width: 210px;
+}
+
+.picker input{
+  width: 100%;
+  border: 1px solid var(--stroke);
+  background: rgba(255,255,255,0.05);
+  color: var(--text);
+  border-radius: 12px;
+  padding: 8px 10px;
+  font-size: 12px;
+  outline: none;
+}
+
+.picker input::placeholder{ color: rgba(255,255,255,0.45); }
+
+.suggestions{
+  position:absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  border: 1px solid var(--stroke);
+  background: rgba(10,14,20,0.98);
+  border-radius: 12px;
+  overflow:hidden;
+  z-index: 999;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+}
+
+.suggestion{
+  padding: 9px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  display:flex;
+  justify-content:space-between;
+  gap: 8px;
+}
+
+.suggestion:hover{
+  background: rgba(255,255,255,0.06);
+}
+
+.suggestion small{
+  color: var(--muted);
+  white-space: nowrap;
+}
+
