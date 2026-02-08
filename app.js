@@ -1,8 +1,9 @@
 // ---- CONFIG ----
-// Fallback if no location params are provided:
 const DEFAULT_LAT = 41.8781;   // Chicago
 const DEFAULT_LON = -87.6298;
 const DEFAULT_LABEL = "Chicago";
+
+const STORAGE_KEY = "nw_location_v1";
 
 // ---- Helpers ----
 function qs(key){
@@ -15,7 +16,6 @@ function fmtTime(){
   return d.toLocaleString(undefined, { weekday:"short", hour:"numeric", minute:"2-digit" });
 }
 
-// Open-Meteo weather code → label
 function codeToSummary(code){
   const map = new Map([
     [0, "Clear"],
@@ -30,10 +30,8 @@ function codeToSummary(code){
   return map.get(code) ?? `Weather (${code})`;
 }
 
-// Element mapping (your Layer 3)
 function elementFor(summary){
   const s = summary.toLowerCase();
-
   if (s.includes("rain") || s.includes("drizzle") || s.includes("snow") || s.includes("thunder") || s.includes("showers")){
     return { label: "💧 Water", cue: "Release, cleanse, soften. Small ritual: rinse hands + 3 slow breaths." };
   }
@@ -46,71 +44,76 @@ function elementFor(summary){
   return { label: "🌱 Earth", cue: "Stabilize, tend, ground. Small ritual: tidy one surface + feel your feet." };
 }
 
-async function geocodeCity(city, region, country){
-  const url = new URL("https://geocoding-api.open-meteo.com/v1/search");
-  url.searchParams.set("name", city);
-  url.searchParams.set("count", "1");
-  url.searchParams.set("language", "en");
-  url.searchParams.set("format", "json");
-  if (country) url.searchParams.set("country", country);
-  // Open-Meteo geocoding doesn’t have a strict “region” param, but we can bias results:
-  // We'll keep region for labeling and (if you want later) could do more filtering.
-
-  const res = await fetch(url.toString(), { cache: "no-store" });
-  if (!res.ok) throw new Error("Geocoding failed");
-  const data = await res.json();
-
-  if (!data.results || data.results.length === 0) {
-    throw new Error("No geocoding results");
-  }
-
-  const r = data.results[0];
-  const labelParts = [r.name];
-  if (region) labelParts.push(region);
-  else if (r.admin1) labelParts.push(r.admin1);
-  if (country || r.country_code) labelParts.push((country ?? r.country_code).toUpperCase());
-
-  return {
-    lat: r.latitude,
-    lon: r.longitude,
-    label: labelParts.join(", ")
-  };
+function safeParse(json){
+  try { return JSON.parse(json); } catch { return null; }
 }
 
-async function resolveLocation(){
-  // Prefer explicit coordinates
+function loadSavedLocation(){
+  const raw = localStorage.getItem(STORAGE_KEY);
+  const v = raw ? safeParse(raw) : null;
+  if (v && typeof v.lat === "number" && typeof v.lon === "number" && typeof v.label === "string") return v;
+  return null;
+}
+
+function saveLocation(loc){
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(loc));
+}
+
+function setHeader(label){
+  document.getElementById("location").textContent = label;
+  document.getElementById("time").textContent = fmtTime();
+}
+
+// ---- Location resolution ----
+async function geocodeSearch(query){
+  const url = new URL("https://geocoding-api.open-meteo.com/v1/search");
+  url.searchParams.set("name", query);
+  url.searchParams.set("count", "8");
+  url.searchParams.set("language", "en");
+  url.searchParams.set("format", "json");
+
+  const res = await fetch(url.toString(), { cache: "no-store" });
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.results ?? [];
+}
+
+function locLabel(r){
+  const parts = [r.name];
+  if (r.admin1) parts.push(r.admin1);
+  if (r.country_code) parts.push(r.country_code.toUpperCase());
+  return parts.join(", ");
+}
+
+async function resolveInitialLocation(){
+  // 1) URL coords (power user)
   const latParam = qs("lat");
   const lonParam = qs("lon");
   const labelParam = qs("label");
-
-  if (latParam && lonParam && !Number.isNaN(Number(latParam)) && !Number.isNaN(Number(lonParam))) {
-    return {
-      lat: Number(latParam),
-      lon: Number(lonParam),
-      label: labelParam ?? "Weather"
-    };
+  if (latParam && lonParam && !Number.isNaN(Number(latParam)) && !Number.isNaN(Number(lonParam))){
+    return { lat: Number(latParam), lon: Number(lonParam), label: labelParam ?? "Weather" };
   }
 
-  // Otherwise allow city-based location
+  // 2) URL city (optional)
   const city = qs("city");
-  const region = qs("region");   // e.g. TX, IL
-  const country = qs("country"); // e.g. US, GB
-
-  if (city) {
-    return await geocodeCity(city, region, country);
+  if (city){
+    const results = await geocodeSearch(city);
+    if (results.length){
+      const r = results[0];
+      return { lat: r.latitude, lon: r.longitude, label: locLabel(r) };
+    }
   }
 
-  // Fallback
+  // 3) Saved selection
+  const saved = loadSavedLocation();
+  if (saved) return saved;
+
+  // 4) fallback
   return { lat: DEFAULT_LAT, lon: DEFAULT_LON, label: DEFAULT_LABEL };
 }
 
-// ---- Main ----
-async function run(){
-  const { lat, lon, label } = await resolveLocation();
-
-  document.getElementById("location").textContent = label;
-  document.getElementById("time").textContent = fmtTime();
-
+// ---- Weather fetch/render ----
+async function fetchWeather(lat, lon){
   const url = new URL("https://api.open-meteo.com/v1/forecast");
   url.searchParams.set("latitude", String(lat));
   url.searchParams.set("longitude", String(lon));
@@ -123,8 +126,10 @@ async function run(){
 
   const res = await fetch(url.toString(), { cache: "no-store" });
   if (!res.ok) throw new Error("Weather fetch failed");
-  const data = await res.json();
+  return await res.json();
+}
 
+function renderWeather(data){
   const cur = data.current;
   const daily = data.daily;
 
@@ -136,27 +141,86 @@ async function run(){
   document.getElementById("hilow").textContent =
     `H: ${Math.round(daily.temperature_2m_max[0])}°  L: ${Math.round(daily.temperature_2m_min[0])}°`;
 
-  document.getElementById("precip").textContent =
-    `${(cur.precipitation ?? 0).toFixed(2)} in`;
-
-  document.getElementById("wind").textContent =
-    `${Math.round(cur.wind_speed_10m)} mph`;
-
-  document.getElementById("humidity").textContent =
-    `${Math.round(cur.relative_humidity_2m)}%`;
-
-  document.getElementById("feels").textContent =
-    `${Math.round(cur.apparent_temperature)}°`;
+  document.getElementById("precip").textContent = `${(cur.precipitation ?? 0).toFixed(2)} in`;
+  document.getElementById("wind").textContent = `${Math.round(cur.wind_speed_10m)} mph`;
+  document.getElementById("humidity").textContent = `${Math.round(cur.relative_humidity_2m)}%`;
+  document.getElementById("feels").textContent = `${Math.round(cur.apparent_temperature)}°`;
 
   document.getElementById("elementBadge").textContent = element.label;
 
-  // Optional ritual cue: toggle with ?cue=0
   const cueOn = (qs("cue") ?? "1") !== "0";
   document.getElementById("ritualCue").textContent = cueOn ? element.cue : "";
 }
 
-run().catch(err => {
-  document.getElementById("location").textContent = "Weather unavailable";
-  document.getElementById("summary").textContent = "Check location params";
-  console.error(err);
-});
+async function loadAndRender(loc){
+  setHeader(loc.label);
+  const data = await fetchWeather(loc.lat, loc.lon);
+  renderWeather(data);
+}
+
+// ---- Picker UI ----
+function setupPicker(){
+  const input = document.getElementById("cityInput");
+  const box = document.getElementById("suggestions");
+
+  let debounceTimer = null;
+
+  function hide(){
+    box.hidden = true;
+    box.innerHTML = "";
+  }
+
+  function show(items){
+    box.innerHTML = "";
+    items.forEach((r) => {
+      const div = document.createElement("div");
+      div.className = "suggestion";
+      div.innerHTML = `<span>${r.name}${r.admin1 ? ", " + r.admin1 : ""}</span><small>${(r.country_code ?? "").toUpperCase()}</small>`;
+      div.addEventListener("click", async () => {
+        const loc = { lat: r.latitude, lon: r.longitude, label: locLabel(r) };
+        saveLocation(loc);
+        input.value = ""; // reset
+        hide();
+        await loadAndRender(loc);
+      });
+      box.appendChild(div);
+    });
+    box.hidden = items.length === 0;
+  }
+
+  input.addEventListener("input", () => {
+    const q = input.value.trim();
+    if (debounceTimer) clearTimeout(debounceTimer);
+
+    if (q.length < 2) { hide(); return; }
+
+    debounceTimer = setTimeout(async () => {
+      const results = await geocodeSearch(q);
+      show(results);
+    }, 250);
+  });
+
+  // Close suggestions when clicking outside
+  document.addEventListener("click", (e) => {
+    const picker = e.target.closest(".picker");
+    if (!picker) hide();
+  });
+
+  // Escape key closes
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") hide();
+  });
+}
+
+// ---- Boot ----
+(async function run(){
+  try{
+    setupPicker();
+    const initial = await resolveInitialLocation();
+    await loadAndRender(initial);
+  } catch (err){
+    document.getElementById("location").textContent = "Weather unavailable";
+    document.getElementById("summary").textContent = "Check connection";
+    console.error(err);
+  }
+})();
